@@ -2,6 +2,11 @@
 The quest of one lonely ship for infinite knowledge.  
 The story of useless factoids threating the _status quo_. And by extrapolation... **_the entire world_**.
 
+## The Mandatory Screenshots
+![Main game screen](/screenshots/screenshot.jpg?raw=true "Main game screen")
+![Some explosions](/screenshots/screenshot3.jpg?raw=true "Some explosions")
+![End level](/screenshots/screenshot4.jpg?raw=true "End level")
+
 ## The Story So Far
 The Akashic records have been unlocked and are flooding the Earth! Tapping into the source of information will help save every living creature from excitotoxicity!  
 Become a silent guardian. A watchful protector. Because you are the hero they deserve and need right now.
