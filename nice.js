@@ -33,7 +33,15 @@ var Score = (function() {
     function setTotalWords(total) {
         totalWords = total;
     }
-    
+
+    function cheating() {
+        totalWords = 73;
+        destroyedWords = 42;
+        totalKeysPressed = 9001;
+        totalKeysMissed = 1337;
+        totalKeysHit = 'cheater';
+    }
+
     // for debugging
     function returnStatistics() {
         return {
@@ -61,54 +69,133 @@ var Score = (function() {
         destroyWord: destroyWord,
         setTotalWords: setTotalWords,
         reset: reset,
+        cheating: cheating,
         returnStatistics: returnStatistics,
         generateStatistics: generateStatistics
     };
-    
 })();
 
 var Soundtrack = (function() {
     'use strict';
-    var soundtrack = ["/tracks/74028935", "/tracks/88890943", "/tracks/74028932", "/tracks/88886960", "/tracks/88890946"];
-    var soundPosition = 0;
+    var
+        tracks = ["/tracks/74028935", "/tracks/88890943", "/tracks/74028932", "/tracks/88886960", "/tracks/88890946"],
+        random = false,
+        current = -1,
+        dom = {},
+        settings = {}
+    ;
 
     function next() {
+        SC.streamStopAll();
         soundManager.stopAll();
-        stream(soundtrack[soundPosition]);
-        soundPosition++;
-        if (soundPosition>=soundtrack.length)
-            soundPosition = 0;
+        stream(
+            random ? randomTrack() : nextTrack()
+        );
+    }
+
+    function nextTrack() {
+        current++;
+        if (current > tracks.length) {
+            current = 0;
+        }
+        return tracks[current];
+    }
+
+    function randomTrack() {
+        var trackId;
+
+        // random with a twist
+        for (var index=0; index < 10; index++) {
+            trackId = Math.random() * tracks.length;
+            if (current != trackId) {
+                current = trackId;
+                break;
+            }
+        }
+
+        return tracks[~~trackId];
+    }
+
+    function addTracks(scTracks) {
+        console.log(scTracks);
+        var total = scTracks.length;
+        for (var index=0; index < total; index++) {
+            var track = scTracks[index];
+            tracks.push('/tracks/' + track.id)
+        }
+    }
+
+    function load() {
+        loadByPlaylist();
+        loadByFilter();
+    }
+
+    function loadByFilter() {
+        if (Config.Soundtrack.filter) {
+            SC.get('/tracks', Config.Soundtrack.filter, addTracks);
+        }
+    }
+
+    function loadByPlaylist() {
+        if (Config.Soundtrack.playlist) {
+            SC.get('/playlists/' + Config.Soundtrack.playlist, function(playlist) {
+                console.log('playlist');
+                addTracks(playlist.tracks)
+            });
+        }
+    }
+
+    function initDom() {
+        dom.soundtrackInfo = document.getElementById('soundtrackInfo');
+        dom.soundtrackNext = document.getElementById('soundtrackNext');
     }
 
     function initialize(data) {
+        settings = data;
         SC.initialize(data);
+        load();
+        // init
+        initDom();
+        dom.soundtrackNext.onclick = next;
     }
 
     function play(sound) {
-        sound.setVolume(20);
+        sound.setVolume(Config.Soundtrack.volume);
         sound.play({
             onfinish: function() {
                 play(this);
             }
         });
-        
     }
-    
+
+    function process(info) {
+        var trackInfo =
+            'Music playing: <a href="' + info.permalink_url + '" target="_blank">' + info.title + '</a> by '+
+            '<a href="' + info.user.permalink_url + '" target="_blank">' + info.user.username + '</a>'
+        ;
+        
+        dom.soundtrackInfo.innerHTML = trackInfo;
+    }
+
     function info(track) {
-        var xhrSC = new XMLHttpRequest();
-        xhrSC.open("GET", "http://api.soundcloud.com"+track+".json?client_id={Soundcloud_APP_ID}", false);
-        xhrSC.onreadystatechange = function() {
-            if (xhrSC.readyState == 4) {
-                var trackInfo = JSON.parse(xhrSC.responseText);
-                var showInfo = 'Music playing: <a href="' + trackInfo.permalink_url + '" target="_blank">' + trackInfo.title + '</a> by '+'<a href="' + trackInfo.user.permalink_url + '" target="_blank">' + trackInfo.user.username + '</a><br /><a href="http://soundcloud.com"><img src="https://developers.soundcloud.com/assets/logo_white-8bf7615eb575eeb114fc65323068e1e4.png" /></a>';
-                
-                document.getElementById('currentlyPlaying').innerHTML = showInfo;
+        SC.get(track, function(trackInfo, error) {
+            if (error) {
+                trackInfo = {
+                    permalink_url: '#',
+                    title: 'Error',
+                    user: {
+                        username: 'API',
+                        permalink_url: '#'
+                    }
+                };
             }
-        };
-        xhrSC.send();
+            Logger.log(trackInfo);
+            process(trackInfo);
+        });
     }
 
     function stream(track) {
+        Logger.event('Soundtrack', 'stream', track);
         info(track);
         SC.stream(track, play);
     }
@@ -121,11 +208,10 @@ var Soundtrack = (function() {
 })();
 
 var Sharer = (function() {
-
     function fbShare() {
         var url = 'https://www.facebook.com/dialog/feed?';
         var query = [];
-        query.push('app_id={FB_APP_ID}');
+        query.push('app_id=' + Config.Sharer.FB.app_id);
         query.push('display=popup');
         query.push('link=' + window.location.href);
         query.push('redirect_uri=https://www.facebook.com');
@@ -139,7 +225,8 @@ var Sharer = (function() {
             query.push('caption=Factoid Game');
             query.push('description=Come show us your typing skills.');
         }
-        
+
+        Logger.social('facebook', 'share', undefined, factoidGenerator.url());
         window.open(url + query.join('&'),'name','height=300, width=550');
     }
 
@@ -172,18 +259,35 @@ var factoidGenerator = (function() {
         return fact;
     }
 
+    function getUrl() {
+        return '/factoid/' + id + '/' + fact;
+    }
+
+    function process(data) {
+        id = data.id;
+        fact = data.fact;
+        words = fact.split(' ').map(function(item) {
+            return item.replace(/[^a-zA-Z]/gmi, '').trim();
+        }).filter(Boolean);
+        Logger.page(getUrl());
+    }
+
     function init() {
         var xhr = new XMLHttpRequest();
-        xhr.open("GET", "http://neamtua.koding.io/projectNice/projectNiceApi/api.php?endpoint=random&maxwords=40", false);
+        xhr.open('GET', 'projectNiceApi/api.php?endpoint=random&maxwords=40', false);
         xhr.onreadystatechange = function() {
             if (xhr.readyState == 4) {
-                var json = JSON.parse(xhr.responseText);
-                id = json.id
-                fact = json.fact;
-                words = fact.split(' ').map(function(item) {
-                    return item.replace(/[^a-zA-Z]/gmi, '').trim();
-                });
-                words = words.filter(Boolean);
+                var json;
+                try {
+                    json = xhr.status == 200
+                        ? JSON.parse(xhr.responseText)
+                        : null
+                    ;
+                } catch (e) {
+                    json = null;
+                }
+
+                process(json === null ? Config.Factoid.default : json);
             }
         };
         xhr.send();
@@ -200,11 +304,11 @@ var factoidGenerator = (function() {
     return {
         init: init,
         count: count,
+        url: getUrl,
         fact: getFact,
         word: getWord,
         id: getId
     };
-
 })();
 
 var Enemy = (function() {
@@ -359,31 +463,37 @@ var typeIt = (function() {
     }
 
     function addWord(word) {
+        Logger.event('Stage', 'Creation', word);
         EnemyList().add(Enemy(word));
     }
 
     function debug(key) {
-        return false;
+        if (!Config.Game.debug) {
+            return false;
+        }
         if (key != +key) {
             return false;
         }
         key = +key;
         switch (key) {
             case 1:
-                console.log("Available enemies:", EnemyList().all());
+                Logger.log("Available enemies:", EnemyList().all());
                 break;
             case 2:
                 var word = factoidGenerator.word();
-                console.log("Adding word: " + word);
+                Logger.log("Adding word: " + word);
                 addWord(word);
                 break;
             case 3:
-                console.log("Available words:", EnemyList().all().map(ememyToWord));
+                Logger.log("Available words:", EnemyList().all().map(ememyToWord));
                 break;
             case 4:
                 hitPower = 100;
                 break;
             case 5:
+                Score.cheating();
+                EnemyList().getGame().state.start('Factoid');
+                break;
             case 6:
             case 7:
             case 8:
@@ -393,8 +503,16 @@ var typeIt = (function() {
         return true;
     }
 
+    function getTargetedWord() {
+        return currentIndex === -1
+            ? '_count: ' + EnemyList().count() + ' enemies alive'
+            : getDamage(currentIndex) + '|' + EnemyList().offset(currentIndex).getWord()
+        ;
+    }
+
     function invalid(key) {
         Score.missKey();
+        Logger.event('Stage', 'miss', getTargetedWord());
         console.warn('Invalid key.', key);
         return false;
     }
@@ -511,11 +629,13 @@ var typeIt = (function() {
             Score.destroyWord();
             EnemyList().remove(currentIndex);
             targetUnlock();
+            Logger.event('Stage', 'destroyed', word);
         }
     }
 
     function press(key) {
         if (debug(key)) {
+            Logger.event('Stage', 'debug', key);
             return;
         }
 
@@ -530,16 +650,136 @@ var typeIt = (function() {
         hit(key, EnemyList().offset(currentIndex));
     }
 
+    function getDamage(index) {
+        return isLocked(index)
+            ? damage
+            : 0
+        ;
+    }
+
     return {
         addWord: addWord,
         isLocked: isLocked,
+        damaged: getDamage,
         targetUnlock: targetUnlock,
         press: press
     };
 })();
 
-window.onload = function() {
+var projectTut = (function() {
+    var steps, game, tutText;
 
+    function noop() {}
+    function yesop() {return true}
+
+    function reset() {
+        steps = [];
+    }
+
+    function add(check, process) {
+        steps.push([check || noop, process || noop]);
+    }
+
+    function init() {
+        Logger.page('/tutorial');
+        // reset
+        reset();
+        // easy shorthand
+        game = EnemyList().getGame();
+        // add enemy
+        add(yesop, function() {
+            Logger.event('Tutorial', 'first enemy', 'Enemy Appeared');
+            game.input.keyboard.enabled = false;
+            EnemyList().add('word');
+        })
+        // check that it fell a bit
+        add(function() {
+            var item = EnemyList().offset(0);
+            if (item === undefined) {
+                return true;
+            }
+
+            return item.getSprite().y > 100;
+        }, function() {
+            Logger.event('Tutorial', 'first enemy', 'Enemy Described');
+            game.stopEnemies();
+            tutText = game.add.text(0, 125, "You are not targeting any enemy.\nTarget an enemy by typing it's first letter.");
+            tutText.font = 'Roboto';
+            tutText.fontSize = 20;
+            game.input.keyboard.enabled = true;
+        });
+        // check that it's been targeted
+        add(function() {
+            return game.input.keyboard.isDown(Phaser.Keyboard.W);
+        }, function() {
+            Logger.event('Tutorial', 'first enemy', 'Enemy Shot');
+            // game logic back on track
+            game.input.keyboard.enabled = false;
+            game.startEnemies();
+            // cleanup
+            tutText.destroy();
+            tutText = null;
+        });
+        // tell him how to destroy
+        add(function() {
+            var item = EnemyList().offset(0);
+            if (item === undefined) {
+                return true;
+            }
+
+            return item.getSprite().y > 150;
+        }, function() {
+            Logger.event('Tutorial', 'first enemy', 'Enemy Destroyed');
+            game.stopEnemies();
+            tutText = game.add.text(0, 125, [
+                "When an enemy is left without any letters it is destroyed.",
+                "Targeted enemies need to be destroyed before you can advance to a new enemy.",
+                "Continue to shoot the remaining letters."
+            ].join("\n"));
+            tutText.font = 'Roboto';
+            tutText.fontSize = 20;
+            game.input.keyboard.enabled = true;
+        });
+        // wait for him to shoot it down
+        add(function() {
+            return EnemyList().count() === 0;
+        }, function() {
+            Logger.event('Tutorial', 'first enemy', 'Good Job');
+            tutText.destroy();
+            EnemyList().add('Good');
+            EnemyList().add('Job');
+        });
+        // continue to start menu
+        add(function() {
+            return EnemyList().count() === 0;
+        }, function() {
+            Logger.event('Tutorial', 'first enemy', 'Finished');
+            game.state.start('MainMenu');
+        });
+    }
+
+    function check() {
+        // nothing to check, possibly an error o.O
+        if (steps.length === 0) {
+            return false;
+        }
+        return steps[0][0]();
+    }
+
+    function advance() {
+        var advance = steps[0][1];
+        steps.shift();
+        return advance();
+    }
+
+    return {
+        init: init,
+        check: check,
+        advance: advance
+    }
+})();
+
+window.onload = function() {
     var game, saucerCreateTime, projectNice;
 
     projectNice = {
@@ -551,10 +791,11 @@ window.onload = function() {
                 })
             },
             create: function() {
+                Soundtrack.init(Config.Soundtrack);
                 // set game arcade mode
                 this.physics.startSystem(Phaser.Physics.ARCADE);
-                //  Capture all key presses
-                this.input.keyboard.addCallbacks(this, null, null, typeIt.press);
+                // Block backspace
+                this.input.keyboard.addKeyCapture(Phaser.Keyboard.BACKSPACE);
                 // move to preloader
                 this.state.start('Preloader');
             }
@@ -569,22 +810,19 @@ window.onload = function() {
                 // we should really wait for the font to load
                 // @see http://examples.phaser.io/_site/view_full.html?d=text&f=google+webfonts.js&t=google%20webfonts
                 window.WebFontConfig = this.fontConfig;
-                this.load.image('player', 'http://neamtua.koding.io/projectNice/assets/images/player.png');
-                this.load.image('saucer', 'http://neamtua.koding.io/projectNice/assets/images/enemy.png');
-                this.load.image('saucer-targeted', 'http://neamtua.koding.io/projectNice/assets/images/enemyTargeted.png');
-                this.load.image('startbutton', 'http://neamtua.koding.io/projectNice/assets/images/start-button.png');
-                this.load.image('background', 'http://neamtua.koding.io/projectNice/assets/images/background.png');
-                this.load.image('start-background', 'http://neamtua.koding.io/projectNice/assets/images/start-background.png');
-                this.load.spritesheet('explosion', 'http://neamtua.koding.io/projectNice/assets/images/explosion.png', 100, 100);
                 this.load.script('webfont', '//ajax.googleapis.com/ajax/libs/webfont/1.4.7/webfont.js');
-                this.load.audio('sfx', 'http://neamtua.koding.io/projectNice/assets/audio/pewpew.ogg');
-                this.load.audio('kaboomsfx', 'http://neamtua.koding.io/projectNice/assets/audio/explosion.ogg');
+                this.load.image('player', '/assets/images/player.png?cache');
+                this.load.image('saucer', '/assets/images/enemy.png?cache');
+                this.load.image('saucer-targeted', '/assets/images/enemyTargeted.png?cache');
+                this.load.image('start-button', '/assets/images/start-button.png?cache');
+                this.load.image('tutorial-button', '/assets/images/tutorial-button.png?cache');
+                this.load.image('background', '/assets/images/game-background.png?cache');
+                this.load.image('start-background', '/assets/images/start-background.png?cache');
+                this.load.spritesheet('explosion', '/assets/images/explosion.png', 100, 100);
+                this.load.audio('sfx', '/assets/audio/pewpew.ogg');
+                this.load.audio('kaboomsfx', '/assets/audio/explosion.ogg');
             },
             create: function() {
-                Soundtrack.init({
-                  client_id: '{Soundcloud_APP_ID}'
-                });
-                Soundtrack.play("/tracks/88890947");
                 fx = game.add.audio('sfx');
                 fx.addMarker('full', 1, 1.0, 0.05);
                 kaboomfx = game.add.audio('kaboomsfx');
@@ -593,6 +831,7 @@ window.onload = function() {
                 
                 // set background
                 //this.stage.setBackgroundColor('#2d3337');
+                Soundtrack.play("/tracks/88890947");
                 this.state.start('MainMenu');
             }
         },
@@ -601,9 +840,54 @@ window.onload = function() {
                 this.state.start('Game');
                 Soundtrack.next();
             },
+            tutorial: function() {
+                this.state.start('Tutorial');
+                Soundtrack.next();
+            },
             create: function() {
+                //Soundtrack.next();
                 this.game.add.sprite(0, 0, 'start-background');
-                button = this.add.button(this.world.centerX - 84 / 2, (this.world.height - 47) / 2, 'startbutton', this.start, this);
+                this.add.button(this.world.centerX - 84 / 2, (this.world.height - 47) / 2, 'start-button', this.start, this);
+                this.add.button(this.world.centerX - 84 / 2, (this.world.height - 47) / 2 + 50, 'tutorial-button', this.tutorial, this);
+            }
+        },
+        Tutorial: {
+            makePlayer: function() {
+                this.game.add.sprite(0, 0, 'background');
+                var player = this.add.sprite(this.world.centerX, this.world.height - 72 - 32, 'player');
+                player.anchor.setTo(0.5, 0.5);
+                this.physics.enable(player, Phaser.Physics.ARCADE);
+                return player;
+            },
+            checkStep: function() {
+                if (projectTut.check()) {
+                    projectTut.advance();
+                }
+            },
+            pauseEnemies: function(doPause) {
+                var count = EnemyList().count();
+                for (var index = 0; index < count; index++) {
+                    EnemyList().offset(index).getSprite().body.enable = !doPause;
+                }
+            },
+            stopEnemies: function() {
+                this.pauseEnemies(true);
+            },
+            startEnemies: function() {
+                this.pauseEnemies(false);
+            },
+            update: function() {
+                this.checkStep();
+            },
+            create: function() {
+                // set game on enemy list
+                EnemyList().setGame(this);
+                // set main player
+                EnemyList().setPlayer(this.makePlayer());
+                // Capture all key presses
+                this.input.keyboard.addCallbacks(this, null, null, typeIt.press);
+                // tutorify
+                projectTut.init();
             }
         },
         Game: {
@@ -629,13 +913,14 @@ window.onload = function() {
                 return player;
             },
             create: function() {
-                console.log('new stage');
+                // init current phrase in preparation for stages
+                factoidGenerator.init();
+                // Capture all key presses
+                this.input.keyboard.addCallbacks(this, null, null, typeIt.press);
+                // reset score
                 Score.reset();
                 // set instant create
                 saucerCreateTime = this.time.now;
-                // init current phrase in preparation for stages
-                factoidGenerator.init();
-                console.log('Words: ', factoidGenerator.count());
                 Score.setTotalWords(factoidGenerator.count());
                 // set game on enemy list
                 EnemyList().setGame(this);
@@ -653,6 +938,7 @@ window.onload = function() {
 
                     if (sprite.y > 584) {
                         EnemyList().remove(index);
+                        Logger.event('Stage', 'collision', typeIt.damaged(index) + '|' + enemy.getWord());
                     }
                 }
             },
@@ -662,6 +948,9 @@ window.onload = function() {
             }
         },
         Factoid: {
+            keys: [],
+            preload: function() {
+            },
             next: function() {
                 this.state.start('Game');
                 Soundtrack.next();
@@ -683,7 +972,7 @@ window.onload = function() {
                     }
                     fact.push(word);
                  }
-                 fact.push('\n\nClick to continue ...');
+                 fact.push('\n\nClick or space to continue ...');
                  return fact.join(' ');
             },
             create: function() {
@@ -715,8 +1004,17 @@ window.onload = function() {
                 //text.stroke = '#000000';
                 //text.strokeThickness = 2;
                 //text.setShadow(5, 5, 'rgba(0,0,0,0.5)', 5);
-                
+
+                this.keys = [Phaser.Keyboard.SPACEBAR, Phaser.Keyboard.ENTER];
                 game.input.onDown.add(this.next, this);
+            },
+            update: function() {
+                var len = this.keys.length;
+                for (var index=0; index < len; index++) {
+                    if (this.input.keyboard.isDown(this.keys[index])) {
+                        this.next();
+                    }
+                }
             }
         }
     };
@@ -727,6 +1025,7 @@ window.onload = function() {
     game.state.add('Boot', projectNice.Boot);
     game.state.add('Preloader', projectNice.Preloader);
     game.state.add('MainMenu', projectNice.MainMenu);
+    game.state.add('Tutorial', projectNice.Tutorial);
     game.state.add('Game', projectNice.Game);
     game.state.add('Factoid', projectNice.Factoid);
     game.state.start('Boot');
